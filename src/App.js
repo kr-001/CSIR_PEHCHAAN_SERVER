@@ -1,24 +1,29 @@
 import logo from './logo.svg';
 import './App.css';
+import { Routes, Route } from 'react-router-dom';
+import UsersPage from './components/UsersPage';
+import HomePage from './components/HomePage';
+import Login from './components/Login';
+import UserDetailsComponent from './components/UserDetailsComponent';
+import FileUploadComponent from './components/FileUploadComponent';
+import FileListComponent from './components/FileListComponent';
+import DelCsvComponent from './components/DelCsvComponent';
+import DelFileListComponent from './components/DelFileListComponent';
 
 function App() {
   return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.js</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
-    </div>
+    <>
+      <Routes>
+        <Route path="/userList" element={<UsersPage props="CSIR PEHCHAAN" />} />
+        <Route path='/' element={<HomePage/>}/>
+        <Route path='/loginUser' element={<Login/>}/>
+        <Route path='/UpdateUsersApplication' element={<UserDetailsComponent/>}/>
+        <Route path = '/uploadFiles' element = {<FileUploadComponent/>}/>
+        <Route path = '/uploadDelFiles' element = {<DelCsvComponent/>}/>
+        <Route path = '/fileList' element = {<FileListComponent/>}/>
+        <Route path = '/delFileList' element = {<DelFileListComponent/>}/>
+      </Routes>
+    </>
   );
 }
 
