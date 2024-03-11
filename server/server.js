@@ -10,6 +10,7 @@ const path = require('path')
 const router = express.Router();
 const app = express();
 const port = 4000;
+const speakeasy = require('speakeasy');
 const fs = require('fs')
 app.use(cors());
 const otpStorage = {};
@@ -32,9 +33,9 @@ const pool = mysql.createPool({
 });
 
 // Handle registration API endpoint
+const TOTP_WINDOW = 1; 
+const TOTP_ENCODING = 'base32'
 const sharp = require('sharp');
-
-
 
 
 app.post('/register', upload.single('photo'), (req, res) => {
@@ -48,98 +49,126 @@ app.post('/register', upload.single('photo'), (req, res) => {
   console.log(labCode);
   console.log("Photo Path: Line 41", photoPath);
 
-  // Generate a unique file name for the output photo
-  const outputPhotoPath = path.join(path.dirname(photoPath), `${Date.now()}.jpeg`);
+  // Make a request to the /generateSecret endpoint to get the secret key
+  fetch('http://192.168.0.222:4000/generateSecret')
+    .then(response => response.json())
+    .then(data => {
+      const base32Secret = data.secretKey;
 
-  // Convert the photo to JPEG format
-  sharp(photoPath)
-    .jpeg({ quality: 80 }) // Set the desired quality (e.g., 80)
-    .toFile(outputPhotoPath, (error, info) => {
-      if (error) {
-        console.error('Error converting photo to JPEG:', error);
-        res.status(500).json({ message: 'Error registering user' });
-        return;
-      }
+      // Generate a unique file name for the output photo
+      const outputPhotoPath = path.join(path.dirname(photoPath), `${Date.now()}.jpeg`);
 
-      const checkExistingUserQuery = 'SELECT * FROM master_table_1 WHERE email = ?';
-      const checkExistingUserValues = email;
+      // Convert the photo to JPEG format
+      sharp(photoPath)
+        .jpeg({ quality: 80 }) // Set the desired quality (e.g., 80)
+        .toFile(outputPhotoPath, (error, info) => {
+          if (error) {
+            console.error('Error converting photo to JPEG:', error);
+            res.status(500).json({ message: 'Error registering user' });
+            return;
+          }
 
-      pool.query(checkExistingUserQuery, checkExistingUserValues, (error, results) => {
-        if (error) {
-          console.error('Error checking existing user:', error);
-          res.status(500).json({ message: 'Error registering user' });
-          return;
-        }
+          const checkExistingUserQuery = 'SELECT * FROM master_table_1 WHERE email = ?';
+          const checkExistingUserValues = email;
 
-        if (results.length > 0) {
-          const userData = results[0];
-          console.log("User Data : ", userData);
-
-          // Hash the password using bcrypt
-          bcrypt.hash(userData.password, 10, (err, hashedPassword) => {
-            if (err) {
-              console.error('Error hashing password:', err);
+          pool.query(checkExistingUserQuery, checkExistingUserValues, (error, results) => {
+            if (error) {
+              console.error('Error checking existing user:', error);
               res.status(500).json({ message: 'Error registering user' });
               return;
             }
 
-            // Create the users table if it doesn't exist
-            const createTableQuery = `CREATE TABLE IF NOT EXISTS users (
-              id INT PRIMARY KEY AUTO_INCREMENT,
-              title VARCHAR(255) NOT NULL,
-              fullName VARCHAR(255) NOT NULL,
-              designation VARCHAR(255) NOT NULL,
-              department VARCHAR(255) NOT NULL,
-              LabNameCode VARCHAR(255) NOT NULL,
-              CardNumber VARCHAR(255) NOT NULL,
-              BloodGroup VARCHAR(255) NOT NULL,
-              password VARCHAR(255) NOT NULL,
-              photoPath VARCHAR(255) NOT NULL,
-              email VARCHAR(50) NOT NULL,
-              contact VARCHAR(15) NOT NULL,
-              verification_status VARCHAR(255) NOT NULL,
-              verification_authority VARCHAR(255) NOT NULL,
-              division VARCHAR(20) NOT NULL,
-              subDivision VARCHAR(200) NOT NULL,
-              address VARCHAR(50) NOT NULL
-            )`;
+            if (results.length > 0) {
+              const userData = results[0];
+              console.log("User Data : ", userData);
 
-            pool.query(createTableQuery, (error) => {
-              if (error) {
-                console.error('Error creating users table:', error);
-                res.status(500).json({ message: 'Error registering user' });
-                return;
-              }
-
-              // Save the user data to the users table
-              const insertUserDataQuery = 'INSERT INTO users SET ?';
-              const insertUserDataValues = {
-                ...userData,
-                LabNameCode: labCode,
-                password: hashedPassword, // Use the hashed password
-                photoPath: outputPhotoPath,
-                verification_status: verification_status,
-                verification_authority: verification_authority
-              };
-
-              pool.query(insertUserDataQuery, insertUserDataValues, (error, results) => {
-                if (error) {
-                  console.error('Error inserting user data:', error);
+              // Hash the password using bcrypt
+              bcrypt.hash(userData.password, 10, (err, hashedPassword) => {
+                if (err) {
+                  console.error('Error hashing password:', err);
                   res.status(500).json({ message: 'Error registering user' });
-                } else {
-                  res.status(200).json({ message: 'Registration successful' });
+                  return;
                 }
+
+                // Create the users table if it doesn't exist
+                const createTableQuery = `CREATE TABLE IF NOT EXISTS users (
+                  id INT PRIMARY KEY AUTO_INCREMENT,
+                  title VARCHAR(255) NOT NULL,
+                  fullName VARCHAR(255) NOT NULL,
+                  designation VARCHAR(255) NOT NULL,
+                  department VARCHAR(255) NOT NULL,
+                  LabNameCode VARCHAR(255) NOT NULL,
+                  CardNumber VARCHAR(255) NOT NULL,
+                  BloodGroup VARCHAR(255) NOT NULL,
+                  password VARCHAR(255) NOT NULL,
+                  photoPath VARCHAR(255) NOT NULL,
+                  email VARCHAR(50) NOT NULL,
+                  contact VARCHAR(15) NOT NULL,
+                  verification_status VARCHAR(255) NOT NULL,
+                  verification_authority VARCHAR(255) NOT NULL,
+                  division VARCHAR(20) NOT NULL,
+                  subDivision VARCHAR(200) NOT NULL,
+                  address VARCHAR(50) NOT NULL,
+                  totp_secret VARCHAR(255) NOT NULL
+                )`;
+
+                pool.query(createTableQuery, (error) => {
+                  if (error) {
+                    console.error('Error creating users table:', error);
+                    res.status(500).json({ message: 'Error registering user' });
+                    return;
+                  }
+
+                  // Save the user data to the users table, including the secret key
+                  const insertUserDataQuery = 'INSERT INTO users SET ?';
+                  const insertUserDataValues = {
+                    ...userData,
+                    LabNameCode: labCode,
+                    password: hashedPassword, // Use the hashed password
+                    photoPath: outputPhotoPath,
+                    verification_status: verification_status,
+                    verification_authority: verification_authority,
+                    totp_secret: base32Secret // Store the obtained secret key
+                  };
+
+                  pool.query(insertUserDataQuery, insertUserDataValues, (error, results) => {
+                    if (error) {
+                      console.error('Error inserting user data:', error);
+                      res.status(500).json({ message: 'Error registering user' });
+                    } else {
+                      res.status(200).json({ message: 'Registration successful' });
+                    }
+                  });
+                });
               });
-            });
+            } else {
+              // User with the same email or ID card number does not exist in the master table
+              res.status(404).json({ message: 'User not found in master table' });
+            }
           });
-        } else {
-          // User with the same email or ID card number does not exist in the master table
-          res.status(404).json({ message: 'User not found in master table' });
-        }
-      });
+        });
+    })
+    .catch(error => {
+      console.error('Error generating secret key:', error);
+      res.status(500).json({ message: 'Error registering user' });
     });
 });
 
+
+app.get('/generateSecret', (req, res) => {
+  try {
+      // Generate a secret key using Speakeasy
+      const secret = speakeasy.generateSecret({ length: 20 });
+      const base32Secret = secret.base32;
+      console.log('Retrieved TOTP secret:', secret);
+      
+      // Return the secret key as a JSON response
+      res.json({ secretKey: base32Secret });
+  } catch (err) {
+      console.error('Error generating secret key:', err);
+      res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 
 //Uploaded Photos API
@@ -149,80 +178,95 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.post('/login', (req, res) => {
   console.log("Request Body LOGIN: ", req.body);
-  const { email, password , otp } = req.body;
+  const { email, password , totp } = req.body;
   const query = 'SELECT * FROM users WHERE email = ?';
   const values = [email];
-  const storedOtp = otpStorage[email];
-  
-  if (storedOtp === otp) {
-    pool.query(query, values, (error, results) => {
-      if (error) {
-        console.error('Error authenticating user:', error);
-        res.status(500).json({ message: 'Failed to authenticate' });
-      } else {
-        if (results.length === 1) {
-          const user = results[0];
-          
-          // Compare hashed password using bcrypt
-          bcrypt.compare(password, user.password, (bcryptErr, bcryptRes) => {
-            if (bcryptErr || !bcryptRes) {
-              console.log('Invalid password');
-              res.status(401).json({ message: 'Invalid password' });
-            } else {
-              console.log('User authenticated successfully');
-              const logoQuery = 'SELECT * FROM labLogos WHERE LabNameCode = ?';
-              const logoValues = [user.LabNameCode];
-        
-              pool.query(logoQuery, logoValues, (logoError, logoResults) => {
-                if (logoError) {
-                  console.error('Error fetching logo:', logoError);
-                  res.status(500).json({ message: 'Failed to fetch logo' });
+  console.log('Provided TOTP token:', totp);
+
+  // Retrieve the user data from the database
+  pool.query(query, values, (error, results) => {
+    if (error) {
+      console.error('Error retrieving user data:', error);
+      res.status(500).json({ message: 'Failed to authenticate' });
+      return;
+    }
+
+    if (results.length === 1) {
+      const user = results[0];
+      console.log(user)
+
+      // Retrieve the TOTP secret from the user data
+      const secret = user.totp_secret;
+      console.log("secret: ", secret)
+
+      // Verify the TOTP code
+      const verified = speakeasy.totp.verify({
+        secret: user.totp_secret,
+        encoding: TOTP_ENCODING,
+        token: totp,
+        window: TOTP_WINDOW
+      });
+      console.log('TOTP verification result:', verified);
+      if (verified) {
+        // Compare hashed password using bcrypt
+        bcrypt.compare(password, user.password, (bcryptErr, bcryptRes) => {
+          if (bcryptErr || !bcryptRes) {
+            console.log('Invalid password');
+            res.status(401).json({ message: 'Invalid password' });
+          } else {
+            console.log('User authenticated successfully');
+            const logoQuery = 'SELECT * FROM labLogos WHERE LabNameCode = ?';
+            const logoValues = [user.LabNameCode];
+      
+            pool.query(logoQuery, logoValues, (logoError, logoResults) => {
+              if (logoError) {
+                console.error('Error fetching logo:', logoError);
+                res.status(500).json({ message: 'Failed to fetch logo' });
+              } else {
+                if (logoResults.length === 1) {
+                  const logo = logoResults[0];
+                  const userPayload = {
+                    title: user.title,
+                    name: user.fullName,
+                    designation: user.designation,
+                    division: user.division,
+                    subDivision: user.subDivision,
+                    lab: user.LabNameCode,
+                    id: user.CardNumber,
+                    photoUrl: `http://192.168.0.222:4000/${user.photoPath}`,
+                    email: user.email,
+                    contact: user.contact,
+                    password: user.password,
+                    status: user.verification_status,
+                    autho: user.verification_authority,
+                    logoUrl: logo.logoUrl,
+                    address: user.address,
+                    emergency: user.contact,
+                    bGroup: user.BloodGroup
+                  };
+                  console.log("userPayload", userPayload);
+                  res.status(200).json({
+                    message: 'Authentication successful',
+                    user: userPayload,
+                    decryptedPassword: password // Send decrypted password
+                  });
                 } else {
-                  if (logoResults.length === 1) {
-                    const logo = logoResults[0];
-                    const userPayload = {
-                      title: user.title,
-                      name: user.fullName,
-                      designation: user.designation,
-                      division: user.division,
-                      subDivision: user.subDivision,
-                      lab: user.LabNameCode,
-                      id: user.CardNumber,
-                      photoUrl: `http://192.168.0.222:4000/${user.photoPath}`,
-                      email: user.email,
-                      contact: user.contact,
-                      password: user.password,
-                      status: user.verification_status,
-                      autho: user.verification_authority,
-                      logoUrl: logo.logoUrl,
-                      address: user.address,
-                      emergency: user.contact,
-                      bGroup: user.BloodGroup
-                    };
-                    console.log("userPayload", userPayload);
-                    res.status(200).json({
-                      message: 'Authentication successful',
-                      user: userPayload,
-                      decryptedPassword: password // Send decrypted password
-                    });
-                  } else {
-                    console.log('Logo not found');
-                    res.status(404).json({ message: 'Logo not found' });
-                  }
+                  console.log('Logo not found');
+                  res.status(404).json({ message: 'Logo not found' });
                 }
-              });
-            }
-          });
-        } else {
-          console.log('User not found');
-          res.status(404).json({ message: 'User not found' });
-        }
+              }
+            });
+          }
+        });
+      } else {
+        console.log("Wrong or expired TOTP entered!");
+        res.status(401).json({ message: "Wrong or expired TOTP" });
       }
-    });
-  } else {
-    console.log("WRONG OTP ENTERED!");
-    res.status(401).json({ message: "Wrong Otp" });
-  }
+    } else {
+      console.log('User not found');
+      res.status(404).json({ message: 'User not found' });
+    }
+  });
 });
 
 app.get('/users', cors() ,  (req, res) => {
@@ -533,31 +577,44 @@ app.get('/labnames', (req, res) => {
 
 // Endpoint to verify user credentials
 app.post('/updateRequestVerify', (req, res) => {
-  console.log("REQ VERIFY: ", req)
-  const { email, currentPassword , updatedPassword, updatedAddress } = req.body;
+  const { email, currentPassword, totpCode } = req.body;
 
-  // Query the user from the database
-  const query = 'SELECT * FROM users WHERE email = ?';
-  pool.query(query, [email], (err, results) => {
-    if (err) {
-      console.error('Error querying user:', err);
-      return res.status(500).json({ message: 'Internal server error' });
+  // Fetch user details from the database
+  const selectQuery = 'SELECT totp_secret, password FROM users WHERE email = ?';
+  pool.query(selectQuery, [email], (selectError, selectResults) => {
+    if (selectError) {
+      console.error('Error fetching user details:', selectError);
+      return res.status(500).json({ message: 'Failed to fetch user details' });
     }
 
-    // Check if user exists
-    if (results.length === 0) {
+    if (selectResults.length === 0) {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    const user = results[0];
-    console.log("USER VERIFY: ", user)
-    // Compare hashed password
-    bcrypt.compare(currentPassword, user.password, (err, result) => {
-      if (err || !result) {
-        return res.status(401).json({ message: 'Authentication failed' });
-      }
-      res.status(200).json({ message: 'Authentication successful' });
+    const { totp_secret, password } = selectResults[0];
+
+    // Verify the provided TOTP code
+    const verified = speakeasy.totp.verify({
+      secret: totp_secret,
+      encoding: 'base32',
+      token: totpCode,
+      window: 1 // Allow a time window of 1 interval (30 seconds) for verification
     });
+
+    if (verified) {
+      // TOTP verification successful, now authenticate user with password
+      bcrypt.compare(currentPassword, password, (bcryptError, bcryptResult) => {
+        if (bcryptError || !bcryptResult) {
+          return res.status(401).json({ message: 'Authentication failed' });
+        }
+
+        // Both TOTP and password verification successful
+        res.status(200).json({ message: 'Authentication successful' });
+      });
+    } else {
+      // TOTP verification failed
+      res.status(401).json({ message: 'TOTP verification failed' });
+    }
   });
 });
 
@@ -565,31 +622,30 @@ app.post('/updateRequestVerify', (req, res) => {
 //update user details 
 
 app.put('/updateDetails', (req, res) => {
-  console.log(req.body);
   const { email, address, password } = req.body;
 
-  // Generate salt with 10 rounds
-  bcrypt.genSalt(10, (saltErr, salt) => {
-    if (saltErr) {
-      console.error('Error generating salt:', saltErr);
-      res.status(500).json({ message: 'Failed to update user details' });
+  // Fetch the user's TOTP secret from the database
+  const selectQuery = 'SELECT totp_secret FROM users WHERE email = ?';
+  pool.query(selectQuery, [email], (selectError, selectResults) => {
+    if (selectError) {
+      console.error('Error fetching user details:', selectError);
+      res.status(500).json({ message: 'Failed to fetch user details' });
     } else {
-      // Hash the password with the generated salt
-      bcrypt.hash(password, salt, (hashErr, hashedPassword) => {
-        if (hashErr) {
-          console.error('Error hashing password:', hashErr);
-          res.status(500).json({ message: 'Failed to update user details' });
-        } else {
-          // Check if the user already exists
-          const selectQuery = 'SELECT * FROM users WHERE email = ?';
-          pool.query(selectQuery, [email], (selectError, selectResults) => {
-            if (selectError) {
-              console.error('Error fetching update details:', selectError);
-              res.status(500).json({ message: 'Failed to fetch update details' });
-            } else {
-              console.log("Select Query Result: ", selectResults);
-              if (selectResults.length > 0) {
-                // User exists, update their details
+      if (selectResults.length > 0) {
+        // User exists, retrieve their TOTP secret
+        const totpSecret = selectResults[0].totp_secret;
+
+        bcrypt.genSalt(10, (saltErr, salt) => {
+          if (saltErr) {
+            console.error('Error generating salt:', saltErr);
+            res.status(500).json({ message: 'Failed to update user details' });
+          } else {
+            bcrypt.hash(password, salt, (hashErr, hashedPassword) => {
+              if (hashErr) {
+                console.error('Error hashing password:', hashErr);
+                res.status(500).json({ message: 'Failed to update user details' });
+              } else {
+                // Update the user's address and hashed password
                 const updateQuery = 'UPDATE users SET address = ?, password = ? WHERE email = ?';
                 const updateValues = [address, hashedPassword, email];
                 pool.query(updateQuery, updateValues, (updateError, updateResults) => {
@@ -597,30 +653,21 @@ app.put('/updateDetails', (req, res) => {
                     console.error('Error updating user details:', updateError);
                     res.status(500).json({ message: 'Failed to update user details' });
                   } else {
-                    console.log("Update Results: ", updateResults);
                     res.status(200).json({ message: 'User details updated successfully' });
                   }
                 });
-              } else {
-                // User doesn't exist, insert new user
-                const insertQuery = 'INSERT INTO users (address, password) VALUES (?, ?)';
-                const insertValues = [address, hashedPassword];
-                pool.query(insertQuery, insertValues, (insertError, insertResults) => {
-                  if (insertError) {
-                    console.error('Error saving update details:', insertError);
-                    res.status(500).json({ message: 'Failed to save update details' });
-                  } else {
-                    res.status(200).json({ message: 'Update details saved successfully' });
-                  }
-                });
               }
-            }
-          });
-        }
-      });
+            });
+          }
+        });
+      } else {
+        // User not found in the database
+        res.status(404).json({ message: 'User not found' });
+      }
     }
   });
 });
+
 
 
 //USER UPDATE DETAILS ADMIN API
