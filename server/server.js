@@ -36,7 +36,7 @@ const pool = mysql.createPool({
 const TOTP_WINDOW = 1; 
 const TOTP_ENCODING = 'base32'
 const sharp = require('sharp');
-
+let secretKeyDict = {};
 
 app.post('/register', upload.single('photo'), (req, res) => {
   const { email, idCardNumber } = req.body;
@@ -49,110 +49,107 @@ app.post('/register', upload.single('photo'), (req, res) => {
   console.log(labCode);
   console.log("Photo Path: Line 41", photoPath);
 
-  // Make a request to the /generateSecret endpoint to get the secret key
-  fetch('http://192.168.0.222:4000/generateSecret')
-    .then(response => response.json())
-    .then(data => {
-      const base32Secret = data.secretKey;
+  // Retrieve the secret key from the dictionary
+  const base32Secret = secretKeyDict['temp'];
+  console.log("BASE32 Secret at fetch register: ", base32Secret);
 
-      // Generate a unique file name for the output photo
-      const outputPhotoPath = path.join(path.dirname(photoPath), `${Date.now()}.jpeg`);
+  // Clear the secret key from the dictionary
+  delete secretKeyDict['temp'];
 
-      // Convert the photo to JPEG format
-      sharp(photoPath)
-        .jpeg({ quality: 80 }) // Set the desired quality (e.g., 80)
-        .toFile(outputPhotoPath, (error, info) => {
+  // Generate a unique file name for the output photo
+  const outputPhotoPath = path.join(path.dirname(photoPath), `${Date.now()}.jpeg`);
+
+  // Convert the photo to JPEG format
+  sharp(photoPath)
+      .jpeg({ quality: 80 }) // Set the desired quality (e.g., 80)
+      .toFile(outputPhotoPath, (error, info) => {
           if (error) {
-            console.error('Error converting photo to JPEG:', error);
-            res.status(500).json({ message: 'Error registering user' });
-            return;
+              console.error('Error converting photo to JPEG:', error);
+              res.status(500).json({ message: 'Error registering user' });
+              return;
           }
 
           const checkExistingUserQuery = 'SELECT * FROM master_table_1 WHERE email = ?';
           const checkExistingUserValues = email;
 
           pool.query(checkExistingUserQuery, checkExistingUserValues, (error, results) => {
-            if (error) {
-              console.error('Error checking existing user:', error);
-              res.status(500).json({ message: 'Error registering user' });
-              return;
-            }
-
-            if (results.length > 0) {
-              const userData = results[0];
-              console.log("User Data : ", userData);
-
-              // Hash the password using bcrypt
-              bcrypt.hash(userData.password, 10, (err, hashedPassword) => {
-                if (err) {
-                  console.error('Error hashing password:', err);
+              if (error) {
+                  console.error('Error checking existing user:', error);
                   res.status(500).json({ message: 'Error registering user' });
                   return;
-                }
+              }
 
-                // Create the users table if it doesn't exist
-                const createTableQuery = `CREATE TABLE IF NOT EXISTS users (
-                  id INT PRIMARY KEY AUTO_INCREMENT,
-                  title VARCHAR(255) NOT NULL,
-                  fullName VARCHAR(255) NOT NULL,
-                  designation VARCHAR(255) NOT NULL,
-                  department VARCHAR(255) NOT NULL,
-                  LabNameCode VARCHAR(255) NOT NULL,
-                  CardNumber VARCHAR(255) NOT NULL,
-                  BloodGroup VARCHAR(255) NOT NULL,
-                  password VARCHAR(255) NOT NULL,
-                  photoPath VARCHAR(255) NOT NULL,
-                  email VARCHAR(50) NOT NULL,
-                  contact VARCHAR(15) NOT NULL,
-                  verification_status VARCHAR(255) NOT NULL,
-                  verification_authority VARCHAR(255) NOT NULL,
-                  division VARCHAR(20) NOT NULL,
-                  subDivision VARCHAR(200) NOT NULL,
-                  address VARCHAR(50) NOT NULL,
-                  totp_secret VARCHAR(255) NOT NULL
-                )`;
+              if (results.length > 0) {
+                  const userData = results[0];
+                  console.log("User Data : ", userData);
 
-                pool.query(createTableQuery, (error) => {
-                  if (error) {
-                    console.error('Error creating users table:', error);
-                    res.status(500).json({ message: 'Error registering user' });
-                    return;
-                  }
+                  // Hash the password using bcrypt
+                  bcrypt.hash(userData.password, 10, (err, hashedPassword) => {
+                      if (err) {
+                          console.error('Error hashing password:', err);
+                          res.status(500).json({ message: 'Error registering user' });
+                          return;
+                      }
 
-                  // Save the user data to the users table, including the secret key
-                  const insertUserDataQuery = 'INSERT INTO users SET ?';
-                  const insertUserDataValues = {
-                    ...userData,
-                    LabNameCode: labCode,
-                    password: hashedPassword, // Use the hashed password
-                    photoPath: outputPhotoPath,
-                    verification_status: verification_status,
-                    verification_authority: verification_authority,
-                    totp_secret: base32Secret // Store the obtained secret key
-                  };
+                      // Create the users table if it doesn't exist
+                      const createTableQuery = `CREATE TABLE IF NOT EXISTS users (
+                          id INT PRIMARY KEY AUTO_INCREMENT,
+                          title VARCHAR(255) NOT NULL,
+                          fullName VARCHAR(255) NOT NULL,
+                          designation VARCHAR(255) NOT NULL,
+                          department VARCHAR(255) NOT NULL,
+                          LabNameCode VARCHAR(255) NOT NULL,
+                          CardNumber VARCHAR(255) NOT NULL,
+                          BloodGroup VARCHAR(255) NOT NULL,
+                          password VARCHAR(255) NOT NULL,
+                          photoPath VARCHAR(255) NOT NULL,
+                          email VARCHAR(50) NOT NULL,
+                          contact VARCHAR(15) NOT NULL,
+                          verification_status VARCHAR(255) NOT NULL,
+                          verification_authority VARCHAR(255) NOT NULL,
+                          division VARCHAR(20) NOT NULL,
+                          subDivision VARCHAR(200) NOT NULL,
+                          address VARCHAR(50) NOT NULL,
+                          totp_secret VARCHAR(255) NOT NULL
+                      )`;
 
-                  pool.query(insertUserDataQuery, insertUserDataValues, (error, results) => {
-                    if (error) {
-                      console.error('Error inserting user data:', error);
-                      res.status(500).json({ message: 'Error registering user' });
-                    } else {
-                      res.status(200).json({ message: 'Registration successful' });
-                    }
+                      pool.query(createTableQuery, (error) => {
+                          if (error) {
+                              console.error('Error creating users table:', error);
+                              res.status(500).json({ message: 'Error registering user' });
+                              return;
+                          }
+
+                          // Save the user data to the users table, including the secret key
+                          const insertUserDataQuery = 'INSERT INTO users SET ?';
+                          const insertUserDataValues = {
+                              ...userData,
+                              LabNameCode: labCode,
+                              password: hashedPassword, // Use the hashed password
+                              photoPath: outputPhotoPath,
+                              verification_status: verification_status,
+                              verification_authority: verification_authority,
+                              totp_secret: base32Secret // Store the obtained secret key
+                          };
+
+                          pool.query(insertUserDataQuery, insertUserDataValues, (error, results) => {
+                              if (error) {
+                                  console.error('Error inserting user data:', error);
+                                  res.status(500).json({ message: 'Error registering user' });
+                              } else {
+                                  res.status(200).json({ message: 'Registration successful' });
+                              }
+                          });
+                      });
                   });
-                });
-              });
-            } else {
-              // User with the same email or ID card number does not exist in the master table
-              res.status(404).json({ message: 'User not found in master table' });
-            }
+              } else {
+                  // User with the same email or ID card number does not exist in the master table
+                  res.status(404).json({ message: 'User not found in master table' });
+              }
           });
-        });
-    })
-    .catch(error => {
-      console.error('Error generating secret key:', error);
-      res.status(500).json({ message: 'Error registering user' });
-    });
+      });
 });
+
 
 
 app.get('/generateSecret', (req, res) => {
@@ -161,6 +158,9 @@ app.get('/generateSecret', (req, res) => {
       const secret = speakeasy.generateSecret({ length: 20 });
       const base32Secret = secret.base32;
       console.log('Retrieved TOTP secret:', secret);
+      
+      // Store the secret key in the dictionary
+      secretKeyDict['temp'] = base32Secret;
       
       // Return the secret key as a JSON response
       res.json({ secretKey: base32Secret });
@@ -174,6 +174,7 @@ app.get('/generateSecret', (req, res) => {
 //Uploaded Photos API
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+const passwordDict = {};
 
 
 app.post('/login', (req, res) => {
@@ -181,6 +182,7 @@ app.post('/login', (req, res) => {
   const { email, password , totp } = req.body;
   const query = 'SELECT * FROM users WHERE email = ?';
   const values = [email];
+  passwordDict[email] = password;
   console.log('Provided TOTP token:', totp);
 
   // Retrieve the user data from the database
@@ -236,7 +238,7 @@ app.post('/login', (req, res) => {
                     photoUrl: `http://192.168.0.222:4000/${user.photoPath}`,
                     email: user.email,
                     contact: user.contact,
-                    password: user.password,
+                    password: passwordDict[email],
                     status: user.verification_status,
                     autho: user.verification_authority,
                     logoUrl: logo.logoUrl,
@@ -577,6 +579,7 @@ app.get('/labnames', (req, res) => {
 
 // Endpoint to verify user credentials
 app.post('/updateRequestVerify', (req, res) => {
+  console.log("UPDATE REQ VERIFY", req.body)
   const { email, currentPassword, totpCode } = req.body;
 
   // Fetch user details from the database
@@ -609,10 +612,12 @@ app.post('/updateRequestVerify', (req, res) => {
         }
 
         // Both TOTP and password verification successful
+        console.log("PASSED USED");
         res.status(200).json({ message: 'Authentication successful' });
       });
     } else {
       // TOTP verification failed
+      console.log("TOTP FAILED")
       res.status(401).json({ message: 'TOTP verification failed' });
     }
   });
@@ -621,50 +626,80 @@ app.post('/updateRequestVerify', (req, res) => {
 
 //update user details 
 
-app.put('/updateDetails', (req, res) => {
+app.put('/updateDetails', upload.single('image'), (req, res) => {
+  console.log("UPDATE REQ: ", req.body);
+  console.log("UPDATE FILE: ", req.file);
   const { email, address, password } = req.body;
 
   // Fetch the user's TOTP secret from the database
   const selectQuery = 'SELECT totp_secret FROM users WHERE email = ?';
   pool.query(selectQuery, [email], (selectError, selectResults) => {
-    if (selectError) {
-      console.error('Error fetching user details:', selectError);
-      res.status(500).json({ message: 'Failed to fetch user details' });
-    } else {
-      if (selectResults.length > 0) {
-        // User exists, retrieve their TOTP secret
-        const totpSecret = selectResults[0].totp_secret;
-
-        bcrypt.genSalt(10, (saltErr, salt) => {
-          if (saltErr) {
-            console.error('Error generating salt:', saltErr);
-            res.status(500).json({ message: 'Failed to update user details' });
-          } else {
-            bcrypt.hash(password, salt, (hashErr, hashedPassword) => {
-              if (hashErr) {
-                console.error('Error hashing password:', hashErr);
-                res.status(500).json({ message: 'Failed to update user details' });
-              } else {
-                // Update the user's address and hashed password
-                const updateQuery = 'UPDATE users SET address = ?, password = ? WHERE email = ?';
-                const updateValues = [address, hashedPassword, email];
-                pool.query(updateQuery, updateValues, (updateError, updateResults) => {
-                  if (updateError) {
-                    console.error('Error updating user details:', updateError);
-                    res.status(500).json({ message: 'Failed to update user details' });
-                  } else {
-                    res.status(200).json({ message: 'User details updated successfully' });
-                  }
-                });
-              }
-            });
-          }
-        });
+      if (selectError) {
+          console.error('Error fetching user details:', selectError);
+          res.status(500).json({ message: 'Failed to fetch user details' });
       } else {
-        // User not found in the database
-        res.status(404).json({ message: 'User not found' });
+          if (selectResults.length > 0) {
+
+
+              bcrypt.genSalt(10, (saltErr, salt) => {
+                  if (saltErr) {
+                      console.error('Error generating salt:', saltErr);
+                      res.status(500).json({ message: 'Failed to update user details' });
+                  } else {
+                      bcrypt.hash(password, salt, (hashErr, hashedPassword) => {
+                          if (hashErr) {
+                              console.error('Error hashing password:', hashErr);
+                              res.status(500).json({ message: 'Failed to update user details' });
+                          } else {
+                              // Update the user's address and hashed password
+                              const updateQuery = 'UPDATE users SET address = ?, password = ? WHERE email = ?';
+                              const updateValues = [address, hashedPassword, email];
+                              pool.query(updateQuery, updateValues, (updateError, updateResults) => {
+                                  if (updateError) {
+                                      console.error('Error updating user details:', updateError);
+                                      res.status(500).json({ message: 'Failed to update user details' });
+                                  } else {
+                                      // Check if an image was uploaded
+                                      if (req.file) {
+                                          // Process the uploaded image with Sharp
+                                          const photoPath = req.file.path;
+                                          const outputPhotoPath = path.join(path.dirname(photoPath), `${Date.now()}.jpeg`);
+
+                                          sharp(photoPath)
+                                              .jpeg()
+                                              .toFile(outputPhotoPath, (sharpErr, info) => {
+                                                  if (sharpErr) {
+                                                      console.error('Error converting image to JPEG:', sharpErr);
+                                                      res.status(500).json({ message: 'Failed to convert image to JPEG' });
+                                                  } else {
+                                                      // Update the photo path in the database
+                                                      const updatePhotoQuery = 'UPDATE users SET photoPath = ? WHERE email = ?';
+                                                      const updatePhotoValues = [outputPhotoPath, email];
+                                                      pool.query(updatePhotoQuery, updatePhotoValues, (photoError, photoResults) => {
+                                                          if (photoError) {
+                                                              console.error('Error updating photo path:', photoError);
+                                                              res.status(500).json({ message: 'Failed to update photo path' });
+                                                          } else {
+                                                              res.status(200).json({ message: 'User details and photo path updated successfully' });
+                                                          }
+                                                      });
+                                                  }
+                                              });
+                                      } else {
+                                          // No image uploaded, only update user details
+                                          res.status(200).json({ message: 'User details updated successfully' });
+                                      }
+                                  }
+                              });
+                          }
+                      });
+                  }
+              });
+          } else {
+              // User not found in the database
+              res.status(404).json({ message: 'User not found' });
+          }
       }
-    }
   });
 });
 
